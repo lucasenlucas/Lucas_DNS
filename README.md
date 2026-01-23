@@ -4,31 +4,34 @@ Cross-platform DNS/Domain info tool voor **Kali Linux**, **macOS** en **Windows*
 
 ## Install
 
-### Optie 1 — via Go (makkelijkst)
+### Kali Linux (aanbevolen)
 
-Als je Go geïnstalleerd hebt:
-
-```bash
-go install github.com/lucasenlucas/Lucas_DNS@latest
-```
-
-Daarna:
-
-```bash
-lucasdns --help
-```
-
-### Optie 2 — via GitHub Releases (aanrader voor non-Go users)
-
-Download de laatste release binaries voor jouw platform (Linux/macOS/Windows) vanaf [GitHub Releases](https://github.com/lucasenlucas/Lucas_DNS/releases).
-
-**Linux/macOS installer (automatisch):**
+**Automatische installatie (detecteert automatisch architecture - amd64/arm64):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lucasenlucas/Lucas_DNS/main/scripts/install.sh | sh
 ```
 
-**⚠️ Belangrijk:** Als de installer `~/.local/bin` gebruikt (omdat `/usr/local/bin` niet beschikbaar is), moet je deze directory aan je PATH toevoegen:
+De installer:
+- ✅ Detecteert automatisch je architecture (amd64 of arm64)
+- ✅ Downloadt de juiste binary
+- ✅ Installeert naar `/usr/local/bin` (vereist sudo)
+- ✅ Test of alles werkt
+
+**Na installatie:**
+```bash
+lucasdns --help
+```
+
+### macOS / Andere Linux distributies
+
+**Automatische installatie:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lucasenlucas/Lucas_DNS/main/scripts/install.sh | sh
+```
+
+**⚠️ Als je geen sudo hebt:** De installer gebruikt dan `~/.local/bin`. Voeg dit toe aan je PATH:
 
 **Voor zsh (macOS standaard):**
 ```bash
@@ -42,14 +45,16 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-Of handmatig installeren:
+### Via Go (als je Go geïnstalleerd hebt)
 
 ```bash
-REPO="lucasenlucas/Lucas_DNS" sh scripts/install.sh
+go install github.com/lucasenlucas/Lucas_DNS@latest
+lucasdns --help
 ```
 
-**Windows PowerShell:**
+### Windows
 
+**PowerShell:**
 ```powershell
 .\scripts\install.ps1 -Repo "lucasenlucas/Lucas_DNS"
 ```
