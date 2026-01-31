@@ -20,10 +20,10 @@ import (
 	"github.com/miekg/dns"
 )
 
-const version = "3.2.6"
+const version = "3.2.7"
 
 func printBanner() {
-	fmt.Println("Lucas DNS is made by Lucas Mangroelal | lucasmangroelal.nl")
+	fmt.Println("UltraDNS (part of Lucas Kit) is made by Lucas Mangroelal | lucasmangroelal.nl")
 }
 
 type options struct {
@@ -49,8 +49,6 @@ type options struct {
 
 	resolver string
 	timeout  time.Duration
-
-
 }
 
 func main() {
@@ -84,13 +82,13 @@ func main() {
 		printBanner()
 		fmt.Fprintf(os.Stderr, "Version: %s\n\n", version)
 		fmt.Fprintf(os.Stderr, "Gebruik:\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d <domein> [flags]\n\n")
+		fmt.Fprintf(os.Stderr, "  ultradns -d <domein> [flags]\n\n")
 		fmt.Fprintf(os.Stderr, "Voorbeelden:\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -subs\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -inf -n\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -whois\n")
-		fmt.Fprintf(os.Stderr, "  lucasdns -d lucasmangroelal.nl -whois\n\n")
-		fmt.Fprintf(os.Stderr, "Voor aanvals tools (voorheen -aanval), zie: lucaskill --help\n\n")
+		fmt.Fprintf(os.Stderr, "  ultradns -d lucasmangroelal.nl -subs\n")
+		fmt.Fprintf(os.Stderr, "  ultradns -d lucasmangroelal.nl -inf -n\n")
+		fmt.Fprintf(os.Stderr, "  ultradns -d lucasmangroelal.nl -whois\n")
+		fmt.Fprintf(os.Stderr, "  ultradns -d lucasmangroelal.nl -whois\n\n")
+		fmt.Fprintf(os.Stderr, "Voor aanvals tools (voorheen -aanval), zie: sitestress --help\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -224,7 +222,6 @@ func main() {
 		}
 		fmt.Println()
 	}
-
 
 }
 
@@ -596,7 +593,7 @@ func fetchSubdomainsCT(ctx context.Context, domain string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "lucasdns/"+version)
+	req.Header.Set("User-Agent", "ultradns/"+version)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -655,6 +652,3 @@ func fetchSubdomainsCT(ctx context.Context, domain string) ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
-
-
-
