@@ -24,7 +24,7 @@ Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
 
 Expand-Archive -Path $archive -DestinationPath $tmp.FullName -Force
 
-$bins = @("ultradns.exe", "sitestress.exe", "ultracrack.exe")
+$bins = @("ultradns.exe", "sitestress.exe")
 $dest = Join-Path $env:USERPROFILE "bin"
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
 

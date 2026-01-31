@@ -1,12 +1,11 @@
 # Lucas Kit (`lucaskit`)
 
-> The ultimate domain toolkit containing **UltraDNS**, **SiteStress**, and **UltraCrack**. Made by Lucas Mangroelal | lucasmangroelal.nl
+> The ultimate domain toolkit containing **UltraDNS** and **SiteStress**. Made by Lucas Mangroelal | lucasmangroelal.nl
 
 **Lucas Kit** is een collectie van krachtige tools voor DNS/Domain information gathering en security testing. Het bevat:
 
 1. **UltraDNS** (voorheen LucasDNS): Info gathering (DNS, WHOIS, Mail Security, Subdomains).
 2. **SiteStress** (voorheen Lucaskill): Advanced HTTP stress test / load test tool.
-3. **UltraCrack**: SecLists integrated brute-force tool.
 
 ## Install
 
@@ -18,7 +17,7 @@
 curl -fsSL https://raw.githubusercontent.com/lucasenlucas/Lucas_Kit/main/scripts/install.sh | sh
 ```
 
-Dit installeert `ultradns`, `sitestress`, en `ultracrack` naar `/usr/local/bin` (of `~/.local/bin`).
+Dit installeert `ultradns` en `sitestress` naar `/usr/local/bin` (of `~/.local/bin`).
 
 ### Windows
 
@@ -68,39 +67,6 @@ sitestress -d <domein> -t <minuten> [flags]
 ```bash
 sitestress -d example.com -t 10
 ```
-
-### 3. UltraCrack (`ultracrack`)
-
-Brute-force tool met SecLists integratie en auto-detectie.
-
-```bash
-ultracrack [flags]
-```
-
-**Features:**
-- **Auto Analyze**: Vindt automatisch inlogvelden (`--analyze`).
-- **SecLists**: Download populaire lijsten (`--dl-seclists`).
-- **Supports**: HTTP Basic Auth & HTML Forms.
-
-**Hoe gebruik je het?**
-
-1. **Vind de velden en command:**
-   Gebruik `--analyze` op je target pagina. De tool vertelt je welk commando je moet gebruiken!
-   ```bash
-   ultracrack --analyze -url http://example.com/login
-   ```
-
-2. **Run de aanval:**
-   Kopieer het gesuggereerde commando, of bouw het zelf:
-   ```bash
-   ultracrack -u admin -pl top-10000.txt -url http://example.com/login -m form -uf username -pf password -fail-text "Invalid password"
-   ```
-
-**Flags:**
-- `-m`: Method (`basic` of `form`).
-- `-uf`: Username veld naam (bijv. `email`, `user_id`).
-- `-pf`: Password veld naam (bijv. `pass`, `pwd`).
-- `-fail-text`: Tekst die op de pagina staat als de login faalt (belangrijk voor form mode!).
 
 > **⚠️ DISCLAIMER:** Gebruik deze tools alleen op systemen waar je expliciete toestemming voor hebt.
 

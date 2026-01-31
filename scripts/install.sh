@@ -11,7 +11,6 @@ set -eu
 REPO="${REPO:-lucasenlucas/Lucas_Kit}"
 BIN_1="ultradns"
 BIN_2="sitestress"
-BIN_3="ultracrack"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_RAW="$(uname -m)"
@@ -115,7 +114,6 @@ install_bin() {
 
 install_bin "$BIN_1"
 install_bin "$BIN_2"
-install_bin "$BIN_3"
 
 echo ""
 
