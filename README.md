@@ -60,6 +60,7 @@ sitestress -d <domein> [flags]
 **Features:**
 - **Auto-Scale**: Gebruik `--level` (1-10) om simpel de kracht in te stellen.
 - **Measure**: Gebruik `--measure` om te zien hoe sterk de site beveiligd is en welk level je nodig hebt.
+- **Health Monitor**: Aparte monitor die checkt of de site ECHT down is, om valse meldingen te voorkomen.
 - **Advanced**: Custom concurrency (`-c`) en connection modes (`-no-keepalive`).
 
 **Voorbeelden:**
