@@ -1,15 +1,14 @@
 # Lucas Kit (`lucaskit`)
 
-> The ultimate domain toolkit containing **UltraDNS** and **SiteStress**. Made by Lucas Mangroelal | lucasmangroelal.nl
+> just a domain toolkit containing **UltraDNS** and **SiteStress**. Made by Lucas Mangroelal | lucasmangroelal.nl
 
-**Lucas Kit** is een collectie van krachtige tools voor DNS/Domain information gathering en security testing. Het bevat:
+**UltraDNS** is een collectie van krachtige tools voor DNS/Domain information gathering en security testing. Het bevat: Info gathering (DNS, WHOIS, Mail Security, Subdomains).
 
-1. **UltraDNS** (voorheen LucasDNS): Info gathering (DNS, WHOIS, Mail Security, Subdomains).
-2. **SiteStress** (voorheen Lucaskill): Advanced HTTP stress test / load test tool.
+**SiteStress** is een HTTP stress test / load test tool. (and maybe smt else 😛)
 
 ## Install
 
-### Kali Linux / macOS / Linux (aanbevolen)
+### Kali / macOS / Linux (aanbevolen)
 
 **Automatische installatie (detecteert architecture):**
 
@@ -31,7 +30,7 @@ Dit installeert `ultradns` en `sitestress` naar `/usr/local/bin` (of `~/.local/b
 
 ### 1. UltraDNS (`ultradns`)
 
-Info gathering tool.
+Info gathering tool just all the dns infooo 😮.
 
 ```bash
 ultradns -d <domein> [flags]
